@@ -1,1 +1,1 @@
-gunicorn==26.2.0
+Flask==3.1.3echo requests==2.34.2echo python-dotenv==1.2.3echo playwright==1.62.0echo python-docx==1.2.0echo gunicorn
