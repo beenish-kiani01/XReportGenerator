@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: x-report-generator
+    runtime: python
+    buildCommand: pip install -r requirements.txt && playwright install chromium
+    startCommand: uvicorn app:app
+    envVars:
+      - key: X_BEARER_TOKEN
+        sync: false

@@ -1,0 +1,17 @@
+[
+    {
+        "url": "https://x.com/Inspecto_app/status/2092572872460177496",
+        "handler_id": "@Inspecto_app",
+        "screenshot": "screenshots/post_1.png"
+    },
+    {
+        "url": "https://x.com/WOLVup/status/2092572832731373637",
+        "handler_id": "@WOLVup",
+        "screenshot": "screenshots/post_2.png"
+    },
+    {
+        "url": "https://x.com/lbrit41/status/2092572803866485022",
+        "handler_id": "@lbrit41",
+        "screenshot": "screenshots/post_3.png"
+    }
+]
