@@ -1,3 +1,4 @@
+```python
 import os
 import re
 import traceback
@@ -77,9 +78,11 @@ def search_posts(query, number_of_posts):
     users = {
         user["id"]: user["username"]
         for user in result.get(
-            "includes", {}
+            "includes",
+            {}
         ).get(
-            "users", []
+            "users",
+            []
         )
     }
 
@@ -105,7 +108,6 @@ def search_posts(query, number_of_posts):
             )
         })
 
-    # Latest posts first
     posts.sort(
         key=lambda x: x.get(
             "created_at",
@@ -155,104 +157,210 @@ def get_post_from_url(url):
 
 
 # ============================================================
-# FIND ORIGINAL POST
+# GET OFFICIAL X EMBED HTML
 # ============================================================
 
-def find_original_post(page, post_id):
+def get_x_oembed(post_url):
 
-    selectors = [
-        'article[data-testid="tweet"]',
-        'article[role="article"]',
-        'article',
-        '[data-testid="tweet"]'
-    ]
+    oembed_url = "https://publish.x.com/oembed"
 
-    print("Searching for post:", post_id)
+    params = {
+        "url": post_url,
+        "maxwidth": 550,
+        "hide_thread": "true",
+        "omit_script": "false",
+        "lang": "en",
+        "theme": "light"
+    }
 
-    for selector in selectors:
+    print("Requesting official X oEmbed...")
 
-        try:
-
-            locator = page.locator(selector)
-
-            count = locator.count()
-
-            print(
-                f"{selector}: {count}"
+    response = requests.get(
+        oembed_url,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 "
+                "(compatible; XReportGenerator/1.0)"
             )
+        }
+    )
 
-            if count == 0:
-                continue
+    print(
+        "X oEmbed STATUS:",
+        response.status_code
+    )
 
-            # Search through visible candidates
-            for index in range(
-                min(count, 20)
-            ):
+    if response.status_code != 200:
+        print(
+            "X oEmbed RESPONSE:",
+            response.text[:1000]
+        )
 
-                candidate = locator.nth(index)
+        raise Exception(
+            "X oEmbed request failed: "
+            f"{response.status_code}"
+        )
 
-                try:
+    data = response.json()
 
-                    candidate.wait_for(
-                        state="visible",
-                        timeout=2000
-                    )
+    html = data.get("html")
 
-                    box = candidate.bounding_box()
+    if not html:
+        raise Exception(
+            "X oEmbed returned no embed HTML."
+        )
 
-                    if box is None:
-                        continue
+    print(
+        "X oEmbed HTML received."
+    )
 
-                    # Prefer exact status URL
-                    links = candidate.locator(
-                        f'a[href*="/status/{post_id}"]'
-                    )
-
-                    if links.count() > 0:
-
-                        print(
-                            "Found exact original post."
-                        )
-
-                        return candidate
-
-                except Exception:
-                    continue
-
-            # If exact URL is not available,
-            # use first visible tweet/article
-            for index in range(
-                min(count, 20)
-            ):
-
-                candidate = locator.nth(index)
-
-                try:
-
-                    candidate.wait_for(
-                        state="visible",
-                        timeout=1500
-                    )
-
-                    if candidate.bounding_box() is not None:
-
-                        print(
-                            "Using first visible post."
-                        )
-
-                        return candidate
-
-                except Exception:
-                    continue
-
-        except Exception:
-            continue
-
-    return None
+    return html
 
 
 # ============================================================
-# TAKE POST SCREENSHOTS
+# CREATE SCREENSHOT PAGE
+# ============================================================
+
+def create_embed_page_html(embed_html):
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width,
+                 initial-scale=1.0"
+    >
+
+    <title>X Post</title>
+
+    <style>
+
+        html,
+        body {{
+            margin: 0;
+            padding: 0;
+            background: white;
+        }}
+
+        body {{
+            width: 700px;
+            min-height: 300px;
+
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+
+            padding: 25px;
+            box-sizing: border-box;
+        }}
+
+        #tweet-container {{
+            width: 550px;
+            max-width: 550px;
+        }}
+
+        blockquote.twitter-tweet {{
+            margin: 0 auto !important;
+        }}
+
+    </style>
+</head>
+
+<body>
+
+    <div id="tweet-container">
+        {embed_html}
+    </div>
+
+    <script
+        async
+        src="https://platform.x.com/widgets.js"
+        charset="utf-8">
+    </script>
+
+</body>
+</html>
+"""
+
+
+# ============================================================
+# WAIT FOR X EMBED TO RENDER
+# ============================================================
+
+def wait_for_x_embed(page):
+
+    print(
+        "Waiting for official X embed..."
+    )
+
+    # Wait for the original blockquote
+    try:
+
+        page.locator(
+            "blockquote.twitter-tweet"
+        ).wait_for(
+            state="attached",
+            timeout=15000
+        )
+
+        print(
+            "X blockquote found."
+        )
+
+    except Exception:
+
+        print(
+            "X blockquote was not found."
+        )
+
+    # Wait for widgets.js rendering
+    page.wait_for_timeout(5000)
+
+    # X widget normally creates an iframe
+    try:
+
+        iframe = page.locator(
+            "iframe"
+        ).first
+
+        iframe.wait_for(
+            state="attached",
+            timeout=20000
+        )
+
+        print(
+            "X widget iframe found."
+        )
+
+        iframe.wait_for(
+            state="visible",
+            timeout=10000
+        )
+
+        print(
+            "X widget iframe visible."
+        )
+
+    except Exception:
+
+        print(
+            "X widget iframe not found yet."
+        )
+
+    # Additional rendering time
+    page.wait_for_timeout(5000)
+
+    return True
+
+
+# ============================================================
+# TAKE REAL X EMBED SCREENSHOTS
 # ============================================================
 
 def take_screenshots(posts):
@@ -261,7 +369,9 @@ def take_screenshots(posts):
 
     with sync_playwright() as p:
 
-        print("Starting Chromium...")
+        print(
+            "Starting Chromium..."
+        )
 
         browser = p.chromium.launch(
             headless=True,
@@ -274,20 +384,10 @@ def take_screenshots(posts):
         )
 
         context = browser.new_context(
-
             viewport={
-                "width": 1400,
+                "width": 800,
                 "height": 1200
             },
-
-            user_agent=(
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/145.0.0.0 "
-                "Safari/537.36"
-            ),
 
             locale="en-US",
 
@@ -298,9 +398,9 @@ def take_screenshots(posts):
 
         page = context.new_page()
 
-        # Do NOT hide webdriver or manipulate browser
-        # fingerprinting. Keep the browser environment normal.
-        page.set_default_timeout(10000)
+        page.set_default_timeout(
+            15000
+        )
 
         for i, post in enumerate(
             posts,
@@ -314,207 +414,97 @@ def take_screenshots(posts):
 
             try:
 
-                match = re.search(
-                    r"/status/(\d+)",
-                    post["url"]
-                )
-
-                if not match:
-                    print(
-                        f"Invalid post URL for post {i}"
-                    )
-                    continue
-
-                post_id = match.group(1)
+                post_url = post["url"]
 
                 print(
-                    "Opening:",
-                    post["url"]
+                    "Post URL:",
+                    post_url
                 )
 
-                response = page.goto(
-                    post["url"],
-                    wait_until="domcontentloaded",
-                    timeout=60000
+                # ------------------------------------------------
+                # Get official X embed
+                # ------------------------------------------------
+
+                embed_html = get_x_oembed(
+                    post_url
                 )
 
-                if response:
-                    print(
-                        "Page status:",
-                        response.status
-                    )
+                # ------------------------------------------------
+                # Build local rendering page
+                # ------------------------------------------------
+
+                html = create_embed_page_html(
+                    embed_html
+                )
+
+                print(
+                    "Rendering official X embed..."
+                )
+
+                page.set_content(
+                    html,
+                    wait_until="domcontentloaded"
+                )
+
+                # ------------------------------------------------
+                # Wait for widget
+                # ------------------------------------------------
+
+                wait_for_x_embed(
+                    page
+                )
+
+                # ------------------------------------------------
+                # Check rendered page
+                # ------------------------------------------------
 
                 print(
                     "Page title:",
                     page.title()
                 )
 
-                # Give X time to render
-                page.wait_for_timeout(5000)
-
-                # Wait for network activity to settle when possible
-                try:
-                    page.wait_for_load_state(
-                        "networkidle",
-                        timeout=15000
-                    )
-                except Exception:
-                    pass
-
-                # Additional rendering time
-                page.wait_for_timeout(5000)
-
-                # ------------------------------------------------
-                # Check page text
-                # ------------------------------------------------
-
-                try:
-
-                    body_text = page.locator(
-                        "body"
-                    ).inner_text(
-                        timeout=5000
-                    )
-
-                except Exception:
-
-                    body_text = ""
-
                 print(
-                    "PAGE TEXT PREVIEW:",
-                    body_text[:500].replace(
-                        "\n",
-                        " "
-                    )
+                    "Iframe count:",
+                    page.locator(
+                        "iframe"
+                    ).count()
                 )
 
                 # ------------------------------------------------
-                # Try finding post
+                # Find rendered X iframe
                 # ------------------------------------------------
 
-                print(
-                    "Looking for original post..."
+                iframe = None
+
+                iframe_locator = page.locator(
+                    "iframe"
                 )
 
-                tweet = find_original_post(
-                    page,
-                    post_id
-                )
+                for index in range(
+                    iframe_locator.count()
+                ):
 
-                # ------------------------------------------------
-                # Retry
-                # ------------------------------------------------
-
-                if tweet is None:
-
-                    print(
-                        "Post not found yet. "
-                        "Waiting longer..."
-                    )
-
-                    page.wait_for_timeout(
-                        10000
-                    )
-
-                    tweet = find_original_post(
-                        page,
-                        post_id
-                    )
-
-                # ------------------------------------------------
-                # Final fallback:
-                # look for any element containing the
-                # status URL
-                # ------------------------------------------------
-
-                if tweet is None:
-
-                    print(
-                        "Trying status-link fallback..."
+                    candidate = (
+                        iframe_locator
+                        .nth(index)
                     )
 
                     try:
 
-                        link = page.locator(
-                            f'a[href*="/status/{post_id}"]'
-                        ).first
+                        if (
+                            candidate
+                            .bounding_box()
+                            is not None
+                        ):
 
-                        if link.count() > 0:
-
-                            link.wait_for(
-                                state="visible",
-                                timeout=5000
-                            )
-
-                            parent = link.locator(
-                                "xpath=ancestor::article[1]"
-                            )
-
-                            if parent.count() > 0:
-
-                                parent.wait_for(
-                                    state="visible",
-                                    timeout=3000
-                                )
-
-                                tweet = parent
-
-                                print(
-                                    "Found post through "
-                                    "status-link fallback."
-                                )
-
-                    except Exception as e:
-
-                        print(
-                            "Status-link fallback failed:",
-                            str(e)
-                        )
-
-                # ------------------------------------------------
-                # Still not found
-                # ------------------------------------------------
-
-                if tweet is None:
-
-                    print(
-                        f"Could not locate post {i}"
-                    )
-
-                    debug_file = (
-                        f"{SCREENSHOT_DIR}/"
-                        f"debug_{i}.png"
-                    )
-
-                    page.screenshot(
-                        path=debug_file,
-                        full_page=False
-                    )
-
-                    try:
-
-                        html_file = (
-                            f"{SCREENSHOT_DIR}/"
-                            f"debug_{i}.html"
-                        )
-
-                        with open(
-                            html_file,
-                            "w",
-                            encoding="utf-8"
-                        ) as file:
-
-                            file.write(
-                                page.content()
-                            )
+                            iframe = candidate
+                            break
 
                     except Exception:
-                        pass
-
-                    continue
+                        continue
 
                 # ------------------------------------------------
-                # Screenshot ONLY the post
+                # Screenshot target
                 # ------------------------------------------------
 
                 filename = (
@@ -522,9 +512,57 @@ def take_screenshots(posts):
                     f"post_{i}.png"
                 )
 
-                tweet.screenshot(
-                    path=filename
-                )
+                if iframe is not None:
+
+                    print(
+                        "Taking screenshot "
+                        "of rendered X widget..."
+                    )
+
+                    iframe.screenshot(
+                        path=filename
+                    )
+
+                else:
+
+                    print(
+                        "X iframe not found."
+                    )
+
+                    # The blockquote is still an
+                    # official X representation.
+                    blockquote = page.locator(
+                        "blockquote.twitter-tweet"
+                    ).first
+
+                    if (
+                        blockquote.count() > 0
+                    ):
+
+                        print(
+                            "Taking screenshot "
+                            "of X embed blockquote..."
+                        )
+
+                        blockquote.screenshot(
+                            path=filename
+                        )
+
+                    else:
+
+                        raise Exception(
+                            "Official X embed "
+                            "could not be rendered."
+                        )
+
+                if not os.path.exists(
+                    filename
+                ):
+
+                    raise Exception(
+                        "Screenshot file "
+                        "was not created."
+                    )
 
                 post["screenshot"] = filename
 
@@ -547,6 +585,22 @@ def take_screenshots(posts):
                 )
 
                 traceback.print_exc()
+
+                # Save debug screenshot
+                try:
+
+                    debug_file = (
+                        f"{SCREENSHOT_DIR}/"
+                        f"debug_{i}.png"
+                    )
+
+                    page.screenshot(
+                        path=debug_file,
+                        full_page=True
+                    )
+
+                except Exception:
+                    pass
 
         context.close()
         browser.close()
@@ -585,7 +639,9 @@ def create_word_report(posts):
         "Handler ID"
     ]
 
-    for i, header in enumerate(headers):
+    for i, header in enumerate(
+        headers
+    ):
 
         cell = (
             table.rows[0]
@@ -605,6 +661,7 @@ def create_word_report(posts):
             )
 
             for run in paragraph.runs:
+
                 run.bold = True
 
     for number, post in enumerate(
@@ -744,6 +801,10 @@ def generate():
             "=============================="
         )
 
+        # ------------------------------------------------------
+        # SEARCH OR DIRECT URL
+        # ------------------------------------------------------
+
         if input_type == "url":
 
             print(
@@ -782,6 +843,10 @@ def generate():
                     "No posts found."
             }), 404
 
+        # ------------------------------------------------------
+        # SCREENSHOTS
+        # ------------------------------------------------------
+
         print(
             "Starting screenshot process..."
         )
@@ -799,14 +864,18 @@ def generate():
 
             return jsonify({
                 "error":
-                    "Could not capture the posts."
+                    "Could not capture the X posts."
             }), 500
+
+        # ------------------------------------------------------
+        # WORD REPORT
+        # ------------------------------------------------------
 
         print(
             "Creating Word report..."
         )
 
-        report = create_word_report(
+        create_word_report(
             posts
         )
 
@@ -916,11 +985,10 @@ if __name__ == "__main__":
 
     print("")
 
-    # Local development only.
-    # Render uses Gunicorn.
     app.run(
         host="127.0.0.1",
         port=5000,
         debug=False,
         use_reloader=False
     )
+```
