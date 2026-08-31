@@ -22,7 +22,7 @@ load_dotenv()
 
 TOKEN = os.getenv("X_BEARER_TOKEN")
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 SCREENSHOT_DIR = "screenshots"
 REPORT_DIR = "reports"
@@ -904,7 +904,7 @@ def download():
 # START SERVER
 # ============================================================
 
-if _name_ == "_main_":
+if __name__ == "__main__":
 
     print("")
     print(
@@ -931,3 +931,5 @@ if _name_ == "_main_":
         debug=False,
         use_reloader=False
     )
+
+
