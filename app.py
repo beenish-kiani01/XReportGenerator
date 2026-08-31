@@ -22,7 +22,7 @@ load_dotenv()
 
 TOKEN = os.getenv("X_BEARER_TOKEN")
 
-app = Flask(__name__)
+app = Flask(_name_)
 
 SCREENSHOT_DIR = "screenshots"
 REPORT_DIR = "reports"
@@ -38,9 +38,7 @@ os.makedirs(REPORT_DIR, exist_ok=True)
 def search_posts(query, number_of_posts):
 
     if not TOKEN:
-        raise Exception(
-            "X_BEARER_TOKEN is missing from .env"
-        )
+        raise Exception("X_BEARER_TOKEN is missing.")
 
     url = "https://api.x.com/2/tweets/search/recent"
 
@@ -69,9 +67,7 @@ def search_posts(query, number_of_posts):
     print("X API STATUS:", response.status_code)
 
     if response.status_code != 200:
-
         print("X API RESPONSE:", response.text)
-
         raise Exception(
             f"X API request failed: {response.status_code}"
         )
@@ -104,15 +100,14 @@ def search_posts(query, number_of_posts):
                 f"{username}/status/"
                 f"{tweet['id']}"
             ),
-
             "handler_id": f"@{username}",
-
             "created_at": tweet.get(
                 "created_at",
                 ""
             )
         })
 
+    # Latest posts first
     posts.sort(
         key=lambda x: x.get(
             "created_at",
@@ -143,7 +138,6 @@ def get_post_from_url(url):
     )
 
     if not match:
-
         raise Exception(
             "Invalid X post URL."
         )
@@ -157,11 +151,108 @@ def get_post_from_url(url):
             f"{username}/status/"
             f"{post_id}"
         ),
-
         "handler_id": f"@{username}",
-
         "created_at": ""
     }]
+
+
+# ============================================================
+# FIND ORIGINAL POST
+# ============================================================
+
+def find_original_post(page, post_id):
+
+    selectors = [
+        'article[data-testid="tweet"]',
+        'article[role="article"]',
+        'article'
+    ]
+
+    # --------------------------------------------------------
+    # First attempt
+    # --------------------------------------------------------
+
+    for selector in selectors:
+
+        try:
+
+            locator = page.locator(selector)
+
+            count = locator.count()
+
+            print(
+                f"{selector}: {count}"
+            )
+
+            if count == 0:
+                continue
+
+            # The first article on a direct status page
+            # should normally be the requested post.
+            for index in range(
+                min(count, 10)
+            ):
+
+                candidate = locator.nth(index)
+
+                try:
+
+                    candidate.wait_for(
+                        state="visible",
+                        timeout=3000
+                    )
+
+                    box = candidate.bounding_box()
+
+                    if box is None:
+                        continue
+
+                    # Check whether this article contains
+                    # the requested status URL.
+                    links = candidate.locator(
+                        f'a[href*="/status/{post_id}"]'
+                    )
+
+                    if links.count() > 0:
+                        print(
+                            "Found exact original post."
+                        )
+
+                        return candidate
+
+                except Exception:
+                    continue
+
+            # If exact status link wasn't found,
+            # use first visible article.
+            for index in range(
+                min(count, 10)
+            ):
+
+                candidate = locator.nth(index)
+
+                try:
+
+                    candidate.wait_for(
+                        state="visible",
+                        timeout=2000
+                    )
+
+                    if candidate.bounding_box() is not None:
+
+                        print(
+                            "Using first visible article."
+                        )
+
+                        return candidate
+
+                except Exception:
+                    continue
+
+        except Exception:
+            continue
+
+    return None
 
 
 # ============================================================
@@ -176,14 +267,19 @@ def take_screenshots(posts):
 
         print("Starting Chromium...")
 
-        # IMPORTANT:
-        # Visible browser was used in the earlier
-        # working screenshot setup.
         browser = p.chromium.launch(
-            headless=True
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled"
+            ]
         )
 
         context = browser.new_context(
+
             viewport={
                 "width": 1400,
                 "height": 1200
@@ -198,10 +294,23 @@ def take_screenshots(posts):
                 "Safari/537.36"
             ),
 
-            locale="en-US"
+            locale="en-US",
+
+            timezone_id="UTC"
         )
 
         page = context.new_page()
+
+        # Reduce obvious automation signals
+        page.add_init_script("""
+            Object.defineProperty(
+                navigator,
+                'webdriver',
+                {
+                    get: () => undefined
+                }
+            );
+        """)
 
         for i, post in enumerate(
             posts,
@@ -215,86 +324,118 @@ def take_screenshots(posts):
 
             try:
 
-                page.goto(
+                # ------------------------------------------------
+                # Extract post ID
+                # ------------------------------------------------
+
+                match = re.search(
+                    r"/status/(\d+)",
+                    post["url"]
+                )
+
+                if not match:
+                    print(
+                        f"Invalid post URL for post {i}"
+                    )
+                    continue
+
+                post_id = match.group(1)
+
+                # ------------------------------------------------
+                # Open X post
+                # ------------------------------------------------
+
+                print(
+                    "Opening:",
+                    post["url"]
+                )
+
+                response = page.goto(
                     post["url"],
                     wait_until="domcontentloaded",
                     timeout=60000
                 )
 
+                if response:
+                    print(
+                        "Page status:",
+                        response.status
+                    )
+
                 print(
-                    "Waiting for X page..."
-                )
-
-                page.wait_for_timeout(
-                    8000
+                    "Page title:",
+                    page.title()
                 )
 
                 # ------------------------------------------------
-                # Find the post
+                # Wait for JavaScript
                 # ------------------------------------------------
 
-                tweet = None
-
-                selectors = [
-                    'article[data-testid="tweet"]',
-                    'article[role="article"]',
-                    'article',
-                    '[data-testid="tweet"]'
-                ]
-
-                for selector in selectors:
-
-                    try:
-
-                        locator = page.locator(
-                            selector
-                        )
-
-                        count = locator.count()
-
-                        print(
-                            f"{selector}: {count}"
-                        )
-
-                        if count == 0:
-                            continue
-
-                        for index in range(
-                            min(count, 5)
-                        ):
-
-                            candidate = (
-                                locator.nth(index)
-                            )
-
-                            try:
-
-                                candidate.wait_for(
-                                    state="visible",
-                                    timeout=3000
-                                )
-
-                                if (
-                                    candidate
-                                    .bounding_box()
-                                    is not None
-                                ):
-
-                                    tweet = candidate
-
-                                    break
-
-                            except Exception:
-                                continue
-
-                        if tweet is not None:
-                            break
-
-                    except Exception:
-                        continue
+                page.wait_for_timeout(10000)
 
                 # ------------------------------------------------
-                # Fallback: wait longer
+                # Scroll slightly to trigger rendering
+                # ------------------------------------------------
+
+                try:
+                    page.evaluate(
+                        "window.scrollTo(0, 300)"
+                    )
+
+                    page.wait_for_timeout(3000)
+
+                    page.evaluate(
+                        "window.scrollTo(0, 0)"
+                    )
+
+                    page.wait_for_timeout(3000)
+
+                except Exception:
+                    pass
+
+                # ------------------------------------------------
+                # Detect common X login/interstitial pages
+                # ------------------------------------------------
+
+                body_text = ""
+
+                try:
+                    body_text = page.locator(
+                        "body"
+                    ).inner_text(
+                        timeout=5000
+                    )
+
+                except Exception:
+                    pass
+
+                body_lower = body_text.lower()
+
+                if (
+                    "sign in to x" in body_lower
+                    or "sign in" in body_lower
+                    and "sign up" in body_lower
+                ):
+
+                    print(
+                        "X returned a login/interstitial page."
+                    )
+
+                # ------------------------------------------------
+                # Find original post
+                # ------------------------------------------------
+
+                print(
+                    "Looking for original post..."
+                )
+
+                tweet = find_original_post(
+                    page,
+                    post_id
+                )
+
+                # ------------------------------------------------
+                # Retry after additional wait
                 # ------------------------------------------------
 
                 if tweet is None:
@@ -305,40 +446,13 @@ def take_screenshots(posts):
                     )
 
                     page.wait_for_timeout(
-                        7000
+                        10000
                     )
 
-                    for selector in selectors:
-
-                        try:
-
-                            locator = page.locator(
-                                selector
-                            )
-
-                            if locator.count() > 0:
-
-                                candidate = (
-                                    locator.first
-                                )
-
-                                candidate.wait_for(
-                                    state="visible",
-                                    timeout=5000
-                                )
-
-                                if (
-                                    candidate
-                                    .bounding_box()
-                                    is not None
-                                ):
-
-                                    tweet = candidate
-
-                                    break
-
-                        except Exception:
-                            continue
+                    tweet = find_original_post(
+                        page,
+                        post_id
+                    )
 
                 # ------------------------------------------------
                 # Still not found
@@ -360,10 +474,31 @@ def take_screenshots(posts):
                         full_page=False
                     )
 
+                    # Also save page HTML for debugging
+                    try:
+
+                        html_file = (
+                            f"{SCREENSHOT_DIR}/"
+                            f"debug_{i}.html"
+                        )
+
+                        with open(
+                            html_file,
+                            "w",
+                            encoding="utf-8"
+                        ) as file:
+
+                            file.write(
+                                page.content()
+                            )
+
+                    except Exception:
+                        pass
+
                     continue
 
                 # ------------------------------------------------
-                # Screenshot
+                # Screenshot ONLY the post article
                 # ------------------------------------------------
 
                 filename = (
@@ -394,6 +529,8 @@ def take_screenshots(posts):
                 print(
                     str(e)
                 )
+
+                traceback.print_exc()
 
         context.close()
         browser.close()
@@ -432,6 +569,10 @@ def create_word_report(posts):
         "Handler ID"
     ]
 
+    # --------------------------------------------------------
+    # Header
+    # --------------------------------------------------------
+
     for i, header in enumerate(headers):
 
         cell = (
@@ -452,7 +593,12 @@ def create_word_report(posts):
             )
 
             for run in paragraph.runs:
+
                 run.bold = True
+
+    # --------------------------------------------------------
+    # Rows
+    # --------------------------------------------------------
 
     for number, post in enumerate(
         posts,
@@ -465,8 +611,10 @@ def create_word_report(posts):
             .cells
         )
 
+        # Sr.No
         cells[0].text = str(number)
 
+        # Screenshot
         paragraph = (
             cells[1]
             .paragraphs[0]
@@ -483,8 +631,10 @@ def create_word_report(posts):
             width=Inches(2.3)
         )
 
+        # Post URL
         cells[2].text = post["url"]
 
+        # Handler ID
         cells[3].text = post["handler_id"]
 
         for cell in cells:
@@ -754,7 +904,7 @@ def download():
 # START SERVER
 # ============================================================
 
-if __name__ == "__main__":
+if _name_ == "_main_":
 
     print("")
     print(
