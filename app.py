@@ -180,7 +180,7 @@ def take_screenshots(posts):
         # Visible browser was used in the earlier
         # working screenshot setup.
         browser = p.chromium.launch(
-            headless=False
+            headless=True
         )
 
         context = browser.new_context(
