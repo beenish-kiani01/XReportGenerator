@@ -1,4 +1,4 @@
-```python
+
 import os
 import re
 import traceback
@@ -991,4 +991,3 @@ if __name__ == "__main__":
         debug=False,
         use_reloader=False
     )
-```
