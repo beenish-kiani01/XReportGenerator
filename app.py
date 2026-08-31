@@ -1,4 +1,3 @@
-
 import os
 import re
 import traceback
@@ -369,9 +368,7 @@ def take_screenshots(posts):
 
     with sync_playwright() as p:
 
-        print(
-            "Starting Chromium..."
-        )
+        print("Starting Chromium...")
 
         browser = p.chromium.launch(
             headless=True,
@@ -383,224 +380,275 @@ def take_screenshots(posts):
             ]
         )
 
+        # IMPORTANT:
+        # Create a completely fresh page for every post.
+        # This avoids stale/invisible iframe problems when
+        # processing several X posts in one report.
         context = browser.new_context(
             viewport={
                 "width": 800,
                 "height": 1200
             },
-
             locale="en-US",
-
             timezone_id="UTC",
-
             color_scheme="light"
         )
 
-        page = context.new_page()
+        context.set_default_timeout(20000)
 
-        page.set_default_timeout(
-            15000
-        )
-
-        for i, post in enumerate(
-            posts,
-            1
-        ):
+        for i, post in enumerate(posts, 1):
 
             print(
-                f"Taking screenshot "
-                f"{i}/{len(posts)}..."
+                f"Taking screenshot {i}/{len(posts)}..."
             )
 
-            try:
+            page = None
 
+            try:
                 post_url = post["url"]
 
-                print(
-                    "Post URL:",
-                    post_url
-                )
+                print("Post URL:", post_url)
 
-                # ------------------------------------------------
-                # Get official X embed
-                # ------------------------------------------------
+                embed_html = get_x_oembed(post_url)
 
-                embed_html = get_x_oembed(
-                    post_url
-                )
+                html = create_embed_page_html(embed_html)
 
-                # ------------------------------------------------
-                # Build local rendering page
-                # ------------------------------------------------
+                # Fresh page per post.
+                page = context.new_page()
 
-                html = create_embed_page_html(
-                    embed_html
-                )
+                page.set_default_timeout(20000)
 
-                print(
-                    "Rendering official X embed..."
-                )
+                print("Rendering official X embed...")
 
                 page.set_content(
                     html,
                     wait_until="domcontentloaded"
                 )
 
-                # ------------------------------------------------
-                # Wait for widget
-                # ------------------------------------------------
-
-                wait_for_x_embed(
-                    page
-                )
-
-                # ------------------------------------------------
-                # Check rendered page
-                # ------------------------------------------------
-
-                print(
-                    "Page title:",
-                    page.title()
-                )
-
-                print(
-                    "Iframe count:",
-                    page.locator(
-                        "iframe"
-                    ).count()
-                )
-
-                # ------------------------------------------------
-                # Find rendered X iframe
-                # ------------------------------------------------
-
-                iframe = None
-
-                iframe_locator = page.locator(
-                    "iframe"
-                )
-
-                for index in range(
-                    iframe_locator.count()
-                ):
-
-                    candidate = (
-                        iframe_locator
-                        .nth(index)
+                # Give widgets.js time to create/render the widget.
+                try:
+                    page.wait_for_function(
+                        """
+                        () => {
+                            const iframe =
+                                document.querySelector(
+                                    'iframe'
+                                );
+                            return iframe !== null;
+                        }
+                        """,
+                        timeout=30000
+                    )
+                except Exception:
+                    print(
+                        "Iframe was not created within "
+                        "30 seconds."
                     )
 
-                    try:
-
-                        if (
-                            candidate
-                            .bounding_box()
-                            is not None
-                        ):
-
-                            iframe = candidate
-                            break
-
-                    except Exception:
-                        continue
-
-                # ------------------------------------------------
-                # Screenshot target
-                # ------------------------------------------------
+                page.wait_for_timeout(5000)
 
                 filename = (
                     f"{SCREENSHOT_DIR}/"
                     f"post_{i}.png"
                 )
 
-                if iframe is not None:
+                # ------------------------------------------------
+                # Robustly find a VISIBLE screenshot target.
+                # ------------------------------------------------
+
+                target = None
+
+                # First try visible iframes.
+                iframe_locator = page.locator(
+                    "iframe"
+                )
+
+                iframe_count = iframe_locator.count()
+
+                print(
+                    "Iframe count:",
+                    iframe_count
+                )
+
+                for index in range(iframe_count):
+
+                    candidate = (
+                        iframe_locator.nth(index)
+                    )
+
+                    try:
+                        if not candidate.is_visible():
+                            continue
+
+                        box = candidate.bounding_box()
+
+                        if (
+                            box
+                            and box["width"] > 50
+                            and box["height"] > 50
+                        ):
+                            target = candidate
+                            print(
+                                "Visible X iframe found."
+                            )
+                            break
+
+                    except Exception:
+                        continue
+
+                # If iframe isn't usable, try the rendered
+                # blockquote/container.
+                if target is None:
 
                     print(
-                        "Taking screenshot "
-                        "of rendered X widget..."
+                        "No usable iframe. "
+                        "Trying X embed container..."
                     )
 
-                    iframe.screenshot(
-                        path=filename
+                    candidates = [
+                        "blockquote.twitter-tweet",
+                        "#tweet-container"
+                    ]
+
+                    for selector in candidates:
+
+                        locator = page.locator(
+                            selector
+                        ).first
+
+                        try:
+
+                            if locator.count() == 0:
+                                continue
+
+                            if not locator.is_visible():
+                                continue
+
+                            box = locator.bounding_box()
+
+                            if (
+                                box
+                                and box["width"] > 50
+                                and box["height"] > 50
+                            ):
+                                target = locator
+
+                                print(
+                                    "Visible embed container found:",
+                                    selector
+                                )
+
+                                break
+
+                        except Exception:
+                            continue
+
+                if target is None:
+                    raise Exception(
+                        "X embed rendered, but no visible "
+                        "screenshot target was found."
                     )
 
-                else:
+                # ------------------------------------------------
+                # Make absolutely sure target is visible/stable.
+                # ------------------------------------------------
 
-                    print(
-                        "X iframe not found."
+                target.scroll_into_view_if_needed(
+                    timeout=10000
+                )
+
+                page.wait_for_timeout(1000)
+
+                box = target.bounding_box()
+
+                if not box:
+                    raise Exception(
+                        "Screenshot target has no bounding box."
                     )
 
-                    # The blockquote is still an
-                    # official X representation.
-                    blockquote = page.locator(
-                        "blockquote.twitter-tweet"
-                    ).first
+                print(
+                    "Screenshot target size:",
+                    int(box["width"]),
+                    "x",
+                    int(box["height"])
+                )
 
-                    if (
-                        blockquote.count() > 0
-                    ):
+                # ------------------------------------------------
+                # Screenshot with retry.
+                # ------------------------------------------------
+
+                screenshot_done = False
+
+                for attempt in range(1, 4):
+
+                    try:
 
                         print(
-                            "Taking screenshot "
-                            "of X embed blockquote..."
+                            f"Screenshot attempt "
+                            f"{attempt}/3..."
                         )
 
-                        blockquote.screenshot(
-                            path=filename
+                        target.screenshot(
+                            path=filename,
+                            timeout=20000
                         )
 
-                    else:
+                        if os.path.exists(
+                            filename
+                        ) and os.path.getsize(
+                            filename
+                        ) > 1000:
 
-                        raise Exception(
-                            "Official X embed "
-                            "could not be rendered."
+                            screenshot_done = True
+                            break
+
+                    except Exception as screenshot_error:
+
+                        print(
+                            "Screenshot attempt failed:",
+                            str(screenshot_error)
                         )
 
-                if not os.path.exists(
-                    filename
-                ):
+                        page.wait_for_timeout(
+                            2000
+                        )
+
+                if not screenshot_done:
 
                     raise Exception(
-                        "Screenshot file "
-                        "was not created."
+                        "Could not capture a visible "
+                        "X embed after 3 attempts."
                     )
 
                 post["screenshot"] = filename
 
-                successful_posts.append(
-                    post
-                )
+                successful_posts.append(post)
 
                 print(
-                    f"Screenshot {i} saved."
+                    f"Screenshot {i} saved successfully."
                 )
 
             except Exception as e:
 
                 print(
-                    f"Screenshot {i} failed:"
-                )
-
-                print(
-                    str(e)
+                    f"Screenshot {i} failed: {e}"
                 )
 
                 traceback.print_exc()
 
-                # Save debug screenshot
-                try:
+                # IMPORTANT:
+                # Continue to the next post.
+                # One bad post must not stop a 10-post report.
+                continue
 
-                    debug_file = (
-                        f"{SCREENSHOT_DIR}/"
-                        f"debug_{i}.png"
-                    )
+            finally:
 
-                    page.screenshot(
-                        path=debug_file,
-                        full_page=True
-                    )
+                if page is not None:
 
-                except Exception:
-                    pass
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
 
         context.close()
         browser.close()
