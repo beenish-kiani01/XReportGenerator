@@ -390,7 +390,7 @@ def take_screenshots(posts):
                 "height": 1200
             },
             locale="en-US",
-            timezone_id="UTC",
+            timezone_id="Asia/Karachi",
             color_scheme="light"
         )
 
