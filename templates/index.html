@@ -18,41 +18,26 @@
     <div class="container">
 
         <div class="header">
+
             <h1>X Report Generator</h1>
 
             <p>
                 Generate automated reports from X posts
             </p>
+
         </div>
 
 
         <div class="card">
 
-            <label for="inputType">
-                Input Type
-            </label>
-
-            <select id="inputType">
-
-                <option value="search">
-                    Keyword / Hashtag
-                </option>
-
-                <option value="url">
-                    X Post URL
-                </option>
-
-            </select>
-
-
             <label for="query">
-                Keyword / Hashtag
+                Keyword or Hashtag
             </label>
 
             <input
                 type="text"
                 id="query"
-                placeholder="Example: #AI"
+                placeholder="Example: AI or #AI"
             >
 
 
@@ -87,9 +72,11 @@
             <div id="downloadSection"
                  class="hidden">
 
-                <a id="downloadButton"
-                   class="download-button"
-                   href="#">
+                <a
+                    id="downloadButton"
+                    class="download-button"
+                    href="#"
+                >
 
                     Download Word Report
 

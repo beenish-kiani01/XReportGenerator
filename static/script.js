@@ -1,51 +1,39 @@
-const inputType = document.getElementById("inputType");
+const queryInput =
+    document.getElementById("query");
 
-const queryInput = document.getElementById("query");
-
-const numberSection =
-    document.getElementById("numberSection");
+const numberOfPostsInput =
+    document.getElementById(
+        "numberOfPosts"
+    );
 
 const statusBox =
     document.getElementById("status");
 
 const downloadSection =
-    document.getElementById("downloadSection");
+    document.getElementById(
+        "downloadSection"
+    );
 
 const downloadButton =
-    document.getElementById("downloadButton");
+    document.getElementById(
+        "downloadButton"
+    );
 
 const generateButton =
-    document.getElementById("generateButton");
-
-
-inputType.addEventListener("change", function () {
-
-    if (inputType.value === "url") {
-
-        numberSection.style.display = "none";
-
-        queryInput.placeholder =
-            "Paste X post URL here";
-
-    } else {
-
-        numberSection.style.display = "block";
-
-        queryInput.placeholder =
-            "Example: #AI";
-    }
-
-});
+    document.getElementById(
+        "generateButton"
+    );
 
 
 async function generateReport() {
 
-    const query = queryInput.value.trim();
+    const query =
+        queryInput.value.trim();
 
     const numberOfPosts =
-        document.getElementById(
-            "numberOfPosts"
-        ).value;
+        Number(
+            numberOfPostsInput.value
+        );
 
 
     statusBox.innerHTML = "";
@@ -60,9 +48,25 @@ async function generateReport() {
     if (!query) {
 
         statusBox.innerHTML =
-            "Please enter a keyword, hashtag, or X post URL.";
+            "Please enter a keyword or hashtag.";
 
-        statusBox.className = "error";
+        statusBox.className =
+            "error";
+
+        return;
+    }
+
+
+    if (
+        numberOfPosts < 1 ||
+        numberOfPosts > 100
+    ) {
+
+        statusBox.innerHTML =
+            "Please enter between 1 and 100 posts.";
+
+        statusBox.className =
+            "error";
 
         return;
     }
@@ -94,11 +98,10 @@ async function generateReport() {
 
                     input: query,
 
-                    input_type:
-                        inputType.value,
+                    input_type: "search",
 
                     number_of_posts:
-                        Number(numberOfPosts)
+                        numberOfPosts
 
                 })
             }
@@ -112,13 +115,14 @@ async function generateReport() {
         if (!response.ok) {
 
             throw new Error(
+                data.error ||
                 "Something went wrong."
             );
         }
 
 
         statusBox.innerHTML =
-            "Report generated successfully!";
+            `Report generated successfully! ${data.posts} post(s) captured.`;
 
         statusBox.className =
             "success";
@@ -136,6 +140,7 @@ async function generateReport() {
     } catch (error) {
 
         statusBox.innerHTML =
+            error.message ||
             "Something went wrong.";
 
         statusBox.className =
