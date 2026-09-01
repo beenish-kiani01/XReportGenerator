@@ -122,7 +122,7 @@ async function generateReport() {
 
 
         statusBox.innerHTML =
-            `Report generated successfully! ${data.posts} post(s) captured.`;
+            `Report generated successfully!`;
 
         statusBox.className =
             "success";
