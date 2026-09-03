@@ -13,17 +13,16 @@ from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 
-============================================================
 
-CONFIGURATION
-
-============================================================
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 load_dotenv()
 
 TOKEN = os.getenv("X_BEARER_TOKEN")
 
-app = Flask(name)
+app = Flask(__name__)
 
 SCREENSHOT_DIR = "screenshots"
 REPORT_DIR = "reports"
@@ -31,995 +30,1012 @@ REPORT_DIR = "reports"
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
 
-============================================================
 
-SEARCH X POSTS
-
-============================================================
+# ============================================================
+# SEARCH X POSTS
+# ============================================================
 
 def search_posts(query, number_of_posts):
 
-if not TOKEN:
-    raise Exception("X_BEARER_TOKEN is missing.")
+    if not TOKEN:
+        raise Exception("X_BEARER_TOKEN is missing.")
 
-url = "https://api.x.com/2/tweets/search/recent"
+    url = "https://api.x.com/2/tweets/search/recent"
 
-headers = {
-    "Authorization": f"Bearer {TOKEN}"
-}
+    headers = {
+        "Authorization": f"Bearer {TOKEN}"
+    }
 
-params = {
-    "query": f"{query} -is:retweet",
-    "max_results": max(
-        10,
-        min(int(number_of_posts), 100)
-    ),
-    "tweet.fields": "created_at,author_id",
-    "expansions": "author_id",
-    "user.fields": "username"
-}
-
-response = requests.get(
-    url,
-    headers=headers,
-    params=params,
-    timeout=30
-)
-
-print("X API STATUS:", response.status_code)
-
-if response.status_code != 200:
-    print("X API RESPONSE:", response.text)
-    raise Exception(
-        f"X API request failed: {response.status_code}"
-    )
-
-result = response.json()
-
-users = {
-    user["id"]: user["username"]
-    for user in result.get(
-        "includes",
-        {}
-    ).get(
-        "users",
-        []
-    )
-}
-
-posts = []
-
-for tweet in result.get("data", []):
-
-    username = users.get(
-        tweet.get("author_id"),
-        "Unknown"
-    )
-
-    posts.append({
-        "url": (
-            f"https://x.com/"
-            f"{username}/status/"
-            f"{tweet['id']}"
+    params = {
+        "query": f"{query} -is:retweet",
+        "max_results": max(
+            10,
+            min(int(number_of_posts), 100)
         ),
-        "handler_id": f"@{username}",
-        "created_at": tweet.get(
+        "tweet.fields": "created_at,author_id",
+        "expansions": "author_id",
+        "user.fields": "username"
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        params=params,
+        timeout=30
+    )
+
+    print("X API STATUS:", response.status_code)
+
+    if response.status_code != 200:
+        print("X API RESPONSE:", response.text)
+        raise Exception(
+            f"X API request failed: {response.status_code}"
+        )
+
+    result = response.json()
+
+    users = {
+        user["id"]: user["username"]
+        for user in result.get(
+            "includes",
+            {}
+        ).get(
+            "users",
+            []
+        )
+    }
+
+    posts = []
+
+    for tweet in result.get("data", []):
+
+        username = users.get(
+            tweet.get("author_id"),
+            "Unknown"
+        )
+
+        posts.append({
+            "url": (
+                f"https://x.com/"
+                f"{username}/status/"
+                f"{tweet['id']}"
+            ),
+            "handler_id": f"@{username}",
+            "created_at": tweet.get(
+                "created_at",
+                ""
+            )
+        })
+
+    posts.sort(
+        key=lambda x: x.get(
             "created_at",
             ""
-        )
-    })
+        ),
+        reverse=True
+    )
 
-posts.sort(
-    key=lambda x: x.get(
-        "created_at",
-        ""
-    ),
-    reverse=True
-)
+    return posts[:int(number_of_posts)]
 
-return posts[:int(number_of_posts)]
 
-============================================================
-
-DIRECT X POST URL
-
-============================================================
+# ============================================================
+# DIRECT X POST URL
+# ============================================================
 
 def get_post_from_url(url):
 
-pattern = (
-    r"(?:https?://)?"
-    r"(?:www\.)?"
-    r"(?:x\.com|twitter\.com)/"
-    r"([^/]+)/status/(\d+)"
-)
-
-match = re.search(
-    pattern,
-    url
-)
-
-if not match:
-    raise Exception(
-        "Invalid X post URL."
+    pattern = (
+        r"(?:https?://)?"
+        r"(?:www\.)?"
+        r"(?:x\.com|twitter\.com)/"
+        r"([^/]+)/status/(\d+)"
     )
 
-username = match.group(1)
-post_id = match.group(2)
+    match = re.search(
+        pattern,
+        url
+    )
 
-return [{
-    "url": (
-        f"https://x.com/"
-        f"{username}/status/"
-        f"{post_id}"
-    ),
-    "handler_id": f"@{username}",
-    "created_at": ""
-}]
+    if not match:
+        raise Exception(
+            "Invalid X post URL."
+        )
 
-============================================================
+    username = match.group(1)
+    post_id = match.group(2)
 
-GET OFFICIAL X EMBED HTML
+    return [{
+        "url": (
+            f"https://x.com/"
+            f"{username}/status/"
+            f"{post_id}"
+        ),
+        "handler_id": f"@{username}",
+        "created_at": ""
+    }]
 
-============================================================
+
+# ============================================================
+# GET OFFICIAL X EMBED HTML
+# ============================================================
 
 def get_x_oembed(post_url):
 
-oembed_url = "https://publish.x.com/oembed"
+    oembed_url = "https://publish.x.com/oembed"
 
-params = {
-    "url": post_url,
-    "maxwidth": 550,
-    "hide_thread": "true",
-    "omit_script": "false",
-    "lang": "en",
-    "theme": "light"
-}
-
-print("Requesting official X oEmbed...")
-
-response = requests.get(
-    oembed_url,
-    params=params,
-    timeout=30,
-    headers={
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(compatible; XReportGenerator/1.0)"
-        )
+    params = {
+        "url": post_url,
+        "maxwidth": 550,
+        "hide_thread": "true",
+        "omit_script": "false",
+        "lang": "en",
+        "theme": "light"
     }
-)
 
-print(
-    "X oEmbed STATUS:",
-    response.status_code
-)
+    print("Requesting official X oEmbed...")
 
-if response.status_code != 200:
+    response = requests.get(
+        oembed_url,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 "
+                "(compatible; XReportGenerator/1.0)"
+            )
+        }
+    )
+
     print(
-        "X oEmbed RESPONSE:",
-        response.text[:1000]
+        "X oEmbed STATUS:",
+        response.status_code
     )
 
-    raise Exception(
-        "X oEmbed request failed: "
-        f"{response.status_code}"
+    if response.status_code != 200:
+        print(
+            "X oEmbed RESPONSE:",
+            response.text[:1000]
+        )
+
+        raise Exception(
+            "X oEmbed request failed: "
+            f"{response.status_code}"
+        )
+
+    data = response.json()
+
+    html = data.get("html")
+
+    if not html:
+        raise Exception(
+            "X oEmbed returned no embed HTML."
+        )
+
+    print(
+        "X oEmbed HTML received."
     )
 
-data = response.json()
+    return html
 
-html = data.get("html")
 
-if not html:
-    raise Exception(
-        "X oEmbed returned no embed HTML."
-    )
-
-print(
-    "X oEmbed HTML received."
-)
-
-return html
-
-============================================================
-
-CREATE SCREENSHOT PAGE
-
-============================================================
+# ============================================================
+# CREATE SCREENSHOT PAGE
+# ============================================================
 
 def create_embed_page_html(embed_html):
 
-return f"""
-
+    return f"""
 <!DOCTYPE html>
-
 <html>
 <head>
     <meta charset="UTF-8">
 
-<meta
-    name="viewport"
-    content="width=device-width,
-             initial-scale=1.0"
->
+    <meta
+        name="viewport"
+        content="width=device-width,
+                 initial-scale=1.0"
+    >
 
-<title>X Post</title>
+    <title>X Post</title>
 
-<style>
+    <style>
 
-    html,
-    body {{
-        margin: 0;
-        padding: 0;
-        background: white;
-    }}
+        html,
+        body {{
+            margin: 0;
+            padding: 0;
+            background: white;
+        }}
 
-    body {{
-        width: 700px;
-        min-height: 300px;
+        body {{
+            width: 700px;
+            min-height: 300px;
 
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
 
-        padding: 25px;
-        box-sizing: border-box;
-    }}
+            padding: 25px;
+            box-sizing: border-box;
+        }}
 
-    #tweet-container {{
-        width: 550px;
-        max-width: 550px;
-    }}
+        #tweet-container {{
+            width: 550px;
+            max-width: 550px;
+        }}
 
-    blockquote.twitter-tweet {{
-        margin: 0 auto !important;
-    }}
+        blockquote.twitter-tweet {{
+            margin: 0 auto !important;
+        }}
 
-</style>
-
+    </style>
 </head>
 
 <body>
 
-<div id="tweet-container">
-    {embed_html}
-</div>
+    <div id="tweet-container">
+        {embed_html}
+    </div>
 
-<script
-    async
-    src="https://platform.x.com/widgets.js"
-    charset="utf-8">
-</script>
+    <script
+        async
+        src="https://platform.x.com/widgets.js"
+        charset="utf-8">
+    </script>
 
 </body>
 </html>
 """
 
-============================================================
 
-WAIT FOR X EMBED TO RENDER
-
-============================================================
+# ============================================================
+# WAIT FOR X EMBED TO RENDER
+# ============================================================
 
 def wait_for_x_embed(page):
 
-print(
-    "Waiting for official X embed..."
-)
-
-# Wait for the original blockquote
-try:
-
-    page.locator(
-        "blockquote.twitter-tweet"
-    ).wait_for(
-        state="attached",
-        timeout=15000
-    )
-
     print(
-        "X blockquote found."
+        "Waiting for official X embed..."
     )
 
-except Exception:
+    # Wait for the original blockquote
+    try:
 
-    print(
-        "X blockquote was not found."
-    )
+        page.locator(
+            "blockquote.twitter-tweet"
+        ).wait_for(
+            state="attached",
+            timeout=15000
+        )
 
-# Wait for widgets.js rendering
-page.wait_for_timeout(5000)
+        print(
+            "X blockquote found."
+        )
 
-# X widget normally creates an iframe
-try:
+    except Exception:
 
-    iframe = page.locator(
-        "iframe"
-    ).first
+        print(
+            "X blockquote was not found."
+        )
 
-    iframe.wait_for(
-        state="attached",
-        timeout=20000
-    )
+    # Wait for widgets.js rendering
+    page.wait_for_timeout(5000)
 
-    print(
-        "X widget iframe found."
-    )
+    # X widget normally creates an iframe
+    try:
 
-    iframe.wait_for(
-        state="visible",
-        timeout=10000
-    )
+        iframe = page.locator(
+            "iframe"
+        ).first
 
-    print(
-        "X widget iframe visible."
-    )
+        iframe.wait_for(
+            state="attached",
+            timeout=20000
+        )
 
-except Exception:
+        print(
+            "X widget iframe found."
+        )
 
-    print(
-        "X widget iframe not found yet."
-    )
+        iframe.wait_for(
+            state="visible",
+            timeout=10000
+        )
 
-# Additional rendering time
-page.wait_for_timeout(5000)
+        print(
+            "X widget iframe visible."
+        )
 
-return True
+    except Exception:
 
-============================================================
+        print(
+            "X widget iframe not found yet."
+        )
 
-TAKE REAL X EMBED SCREENSHOTS
+    # Additional rendering time
+    page.wait_for_timeout(5000)
 
-============================================================
+    return True
+
+
+# ============================================================
+# TAKE REAL X EMBED SCREENSHOTS
+# ============================================================
 
 def take_screenshots(posts):
 
-successful_posts = []
+    successful_posts = []
 
-with sync_playwright() as p:
+    with sync_playwright() as p:
 
-    print("Starting Chromium...")
+        print("Starting Chromium...")
 
-    browser = p.chromium.launch(
-        headless=True,
-        args=[
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu"
-        ]
-    )
-
-    context = browser.new_context(
-        viewport={
-            "width": 800,
-            "height": 1200
-        },
-        locale="en-US",
-        timezone_id="Asia/Karachi",
-        color_scheme="light"
-    )
-
-    context.set_default_timeout(15000)
-
-    for i, post in enumerate(posts, 1):
-
-        print(
-            f"Taking screenshot {i}/{len(posts)}..."
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ]
         )
 
-        page = None
+        # IMPORTANT:
+        # Create a completely fresh page for every post.
+        # This avoids stale/invisible iframe problems when
+        # processing several X posts in one report.
+        context = browser.new_context(
+            viewport={
+                "width": 800,
+                "height": 1200
+            },
+            locale="en-US",
+            timezone_id="UTC",
+            color_scheme="light"
+        )
 
-        try:
+        context.set_default_timeout(20000)
 
-            post_url = post["url"]
-
-            print("Post URL:", post_url)
-
-            embed_html = get_x_oembed(post_url)
-
-            html = create_embed_page_html(
-                embed_html
-            )
-
-            page = context.new_page()
-
-            page.set_default_timeout(15000)
-
-            print("Rendering official X embed...")
-
-            page.set_content(
-                html,
-                wait_until="domcontentloaded"
-            )
-
-            # Wait only until an iframe appears.
-            try:
-
-                page.wait_for_function(
-                    """
-                    () => {
-                        return document.querySelector(
-                            'iframe'
-                        ) !== null;
-                    }
-                    """,
-                    timeout=15000
-                )
-
-            except Exception:
-
-                print(
-                    "Iframe did not appear quickly."
-                )
-
-            # Small wait for final rendering.
-            page.wait_for_timeout(1500)
-
-            filename = (
-                f"{SCREENSHOT_DIR}/"
-                f"post_{i}.png"
-            )
-
-            target = None
-
-            iframe_locator = page.locator(
-                "iframe"
-            )
-
-            iframe_count = iframe_locator.count()
+        for i, post in enumerate(posts, 1):
 
             print(
-                "Iframe count:",
-                iframe_count
+                f"Taking screenshot {i}/{len(posts)}..."
             )
 
-            # Find the first visible usable iframe.
-            for index in range(iframe_count):
+            page = None
 
-                candidate = iframe_locator.nth(
-                    index
+            try:
+                post_url = post["url"]
+
+                print("Post URL:", post_url)
+
+                embed_html = get_x_oembed(post_url)
+
+                html = create_embed_page_html(embed_html)
+
+                # Fresh page per post.
+                page = context.new_page()
+
+                page.set_default_timeout(20000)
+
+                print("Rendering official X embed...")
+
+                page.set_content(
+                    html,
+                    wait_until="domcontentloaded"
                 )
 
+                # Give widgets.js time to create/render the widget.
                 try:
-
-                    if not candidate.is_visible():
-                        continue
-
-                    box = candidate.bounding_box()
-
-                    if (
-                        box
-                        and box["width"] > 50
-                        and box["height"] > 50
-                    ):
-
-                        target = candidate
-
-                        print(
-                            "Visible X iframe found."
-                        )
-
-                        break
-
+                    page.wait_for_function(
+                        """
+                        () => {
+                            const iframe =
+                                document.querySelector(
+                                    'iframe'
+                                );
+                            return iframe !== null;
+                        }
+                        """,
+                        timeout=30000
+                    )
                 except Exception:
+                    print(
+                        "Iframe was not created within "
+                        "30 seconds."
+                    )
 
-                    continue
+                page.wait_for_timeout(5000)
 
-            # Fallback to the embed container.
-            if target is None:
-
-                locator = page.locator(
-                    "#tweet-container"
+                filename = (
+                    f"{SCREENSHOT_DIR}/"
+                    f"post_{i}.png"
                 )
 
-                try:
+                # ------------------------------------------------
+                # Robustly find a VISIBLE screenshot target.
+                # ------------------------------------------------
 
-                    if (
-                        locator.count() > 0
-                        and locator.is_visible()
-                    ):
+                target = None
 
-                        box = locator.bounding_box()
+                # First try visible iframes.
+                iframe_locator = page.locator(
+                    "iframe"
+                )
+
+                iframe_count = iframe_locator.count()
+
+                print(
+                    "Iframe count:",
+                    iframe_count
+                )
+
+                for index in range(iframe_count):
+
+                    candidate = (
+                        iframe_locator.nth(index)
+                    )
+
+                    try:
+                        if not candidate.is_visible():
+                            continue
+
+                        box = candidate.bounding_box()
 
                         if (
                             box
                             and box["width"] > 50
                             and box["height"] > 50
                         ):
-
-                            target = locator
-
+                            target = candidate
                             print(
-                                "Using embed container."
+                                "Visible X iframe found."
                             )
+                            break
 
-                except Exception:
+                    except Exception:
+                        continue
 
-                    pass
-
-            if target is None:
-
-                raise Exception(
-                    "No visible X embed found."
-                )
-
-            target.scroll_into_view_if_needed(
-                timeout=5000
-            )
-
-            # Short stabilization delay.
-            page.wait_for_timeout(500)
-
-            screenshot_done = False
-
-            # Two attempts instead of three.
-            for attempt in range(1, 3):
-
-                try:
+                # If iframe isn't usable, try the rendered
+                # blockquote/container.
+                if target is None:
 
                     print(
-                        f"Screenshot attempt "
-                        f"{attempt}/2..."
+                        "No usable iframe. "
+                        "Trying X embed container..."
                     )
 
-                    target.screenshot(
-                        path=filename,
-                        timeout=10000
+                    candidates = [
+                        "blockquote.twitter-tweet",
+                        "#tweet-container"
+                    ]
+
+                    for selector in candidates:
+
+                        locator = page.locator(
+                            selector
+                        ).first
+
+                        try:
+
+                            if locator.count() == 0:
+                                continue
+
+                            if not locator.is_visible():
+                                continue
+
+                            box = locator.bounding_box()
+
+                            if (
+                                box
+                                and box["width"] > 50
+                                and box["height"] > 50
+                            ):
+                                target = locator
+
+                                print(
+                                    "Visible embed container found:",
+                                    selector
+                                )
+
+                                break
+
+                        except Exception:
+                            continue
+
+                if target is None:
+                    raise Exception(
+                        "X embed rendered, but no visible "
+                        "screenshot target was found."
                     )
 
-                    if (
-                        os.path.exists(filename)
-                        and os.path.getsize(filename)
-                        > 1000
-                    ):
+                # ------------------------------------------------
+                # Make absolutely sure target is visible/stable.
+                # ------------------------------------------------
 
-                        screenshot_done = True
-
-                        break
-
-                except Exception as error:
-
-                    print(
-                        "Screenshot attempt failed:",
-                        str(error)
-                    )
-
-                    if attempt < 2:
-
-                        page.wait_for_timeout(1000)
-
-            if not screenshot_done:
-
-                raise Exception(
-                    "Could not capture X embed."
+                target.scroll_into_view_if_needed(
+                    timeout=10000
                 )
 
-            post["screenshot"] = filename
+                page.wait_for_timeout(1000)
 
-            successful_posts.append(
-                post
-            )
+                box = target.bounding_box()
 
-            print(
-                f"Screenshot {i} saved successfully."
-            )
+                if not box:
+                    raise Exception(
+                        "Screenshot target has no bounding box."
+                    )
 
-        except Exception as e:
+                print(
+                    "Screenshot target size:",
+                    int(box["width"]),
+                    "x",
+                    int(box["height"])
+                )
 
-            print(
-                f"Screenshot {i} failed: {e}"
-            )
+                # ------------------------------------------------
+                # Screenshot with retry.
+                # ------------------------------------------------
 
-            traceback.print_exc()
+                screenshot_done = False
 
-            # Continue with remaining posts.
-            continue
+                for attempt in range(1, 4):
 
-        finally:
+                    try:
 
-            if page is not None:
+                        print(
+                            f"Screenshot attempt "
+                            f"{attempt}/3..."
+                        )
 
-                try:
+                        target.screenshot(
+                            path=filename,
+                            timeout=20000
+                        )
 
-                    page.close()
+                        if os.path.exists(
+                            filename
+                        ) and os.path.getsize(
+                            filename
+                        ) > 1000:
 
-                except Exception:
+                            screenshot_done = True
+                            break
 
-                    pass
+                    except Exception as screenshot_error:
 
-    context.close()
+                        print(
+                            "Screenshot attempt failed:",
+                            str(screenshot_error)
+                        )
 
-    browser.close()
+                        page.wait_for_timeout(
+                            2000
+                        )
 
-return successful_posts
+                if not screenshot_done:
 
-============================================================
+                    raise Exception(
+                        "Could not capture a visible "
+                        "X embed after 3 attempts."
+                    )
 
-CREATE WORD REPORT
+                post["screenshot"] = filename
 
-============================================================
+                successful_posts.append(post)
+
+                print(
+                    f"Screenshot {i} saved successfully."
+                )
+
+            except Exception as e:
+
+                print(
+                    f"Screenshot {i} failed: {e}"
+                )
+
+                traceback.print_exc()
+
+                # IMPORTANT:
+                # Continue to the next post.
+                # One bad post must not stop a 10-post report.
+                continue
+
+            finally:
+
+                if page is not None:
+
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+
+        context.close()
+        browser.close()
+
+    return successful_posts
+
+
+# ============================================================
+# CREATE WORD REPORT
+# ============================================================
 
 def create_word_report(posts):
 
-document = Document()
+    document = Document()
 
-title = document.add_heading(
-    "X/Twitter Report",
-    level=1
-)
-
-title.alignment = (
-    WD_ALIGN_PARAGRAPH.CENTER
-)
-
-table = document.add_table(
-    rows=1,
-    cols=4
-)
-
-table.style = "Table Grid"
-
-headers = [
-    "Sr.No",
-    "Screenshot",
-    "Post URL",
-    "Handler ID"
-]
-
-for i, header in enumerate(
-    headers
-):
-
-    cell = (
-        table.rows[0]
-        .cells[i]
+    title = document.add_heading(
+        "X/Twitter Report",
+        level=1
     )
 
-    cell.text = header
-
-    cell.vertical_alignment = (
-        WD_CELL_VERTICAL_ALIGNMENT.CENTER
-    )
-
-    for paragraph in cell.paragraphs:
-
-        paragraph.alignment = (
-            WD_ALIGN_PARAGRAPH.CENTER
-        )
-
-        for run in paragraph.runs:
-
-            run.bold = True
-
-for number, post in enumerate(
-    posts,
-    1
-):
-
-    cells = (
-        table
-        .add_row()
-        .cells
-    )
-
-    cells[0].text = str(number)
-
-    paragraph = (
-        cells[1]
-        .paragraphs[0]
-    )
-
-    paragraph.alignment = (
+    title.alignment = (
         WD_ALIGN_PARAGRAPH.CENTER
     )
 
-    run = paragraph.add_run()
-
-    run.add_picture(
-        post["screenshot"],
-        width=Inches(2.3)
+    table = document.add_table(
+        rows=1,
+        cols=4
     )
 
-    cells[2].text = post["url"]
+    table.style = "Table Grid"
 
-    cells[3].text = post["handler_id"]
+    headers = [
+        "Sr.No",
+        "Screenshot",
+        "Post URL",
+        "Handler ID"
+    ]
 
-    for cell in cells:
+    for i, header in enumerate(
+        headers
+    ):
+
+        cell = (
+            table.rows[0]
+            .cells[i]
+        )
+
+        cell.text = header
 
         cell.vertical_alignment = (
             WD_CELL_VERTICAL_ALIGNMENT.CENTER
         )
 
-output_file = (
-    f"{REPORT_DIR}/X_Report.docx"
-)
+        for paragraph in cell.paragraphs:
 
-document.save(
-    output_file
-)
+            paragraph.alignment = (
+                WD_ALIGN_PARAGRAPH.CENTER
+            )
 
-print(
-    "Report saved:",
-    output_file
-)
+            for run in paragraph.runs:
 
-return output_file
+                run.bold = True
 
-============================================================
+    for number, post in enumerate(
+        posts,
+        1
+    ):
 
-HOME PAGE
+        cells = (
+            table
+            .add_row()
+            .cells
+        )
 
-============================================================
+        cells[0].text = str(number)
+
+        paragraph = (
+            cells[1]
+            .paragraphs[0]
+        )
+
+        paragraph.alignment = (
+            WD_ALIGN_PARAGRAPH.CENTER
+        )
+
+        run = paragraph.add_run()
+
+        run.add_picture(
+            post["screenshot"],
+            width=Inches(2.3)
+        )
+
+        cells[2].text = post["url"]
+
+        cells[3].text = post["handler_id"]
+
+        for cell in cells:
+
+            cell.vertical_alignment = (
+                WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            )
+
+    output_file = (
+        f"{REPORT_DIR}/X_Report.docx"
+    )
+
+    document.save(
+        output_file
+    )
+
+    print(
+        "Report saved:",
+        output_file
+    )
+
+    return output_file
+
+
+# ============================================================
+# HOME PAGE
+# ============================================================
 
 @app.route("/")
 def home():
 
-return render_template(
-    "index.html"
-)
+    return render_template(
+        "index.html"
+    )
 
-============================================================
 
-GENERATE REPORT
-
-============================================================
+# ============================================================
+# GENERATE REPORT
+# ============================================================
 
 @app.route(
-"/generate",
-methods=["POST"]
+    "/generate",
+    methods=["POST"]
 )
 def generate():
 
-try:
+    try:
 
-    data = request.get_json(
-        silent=True
-    )
-
-    if not data:
-
-        return jsonify({
-            "error":
-                "Invalid request."
-        }), 400
-
-    user_input = data.get(
-        "input",
-        ""
-    ).strip()
-
-    input_type = data.get(
-        "input_type",
-        "search"
-    )
-
-    number_of_posts = int(
-        data.get(
-            "number_of_posts",
-            10
+        data = request.get_json(
+            silent=True
         )
-    )
 
-    if not user_input:
+        if not data:
 
-        return jsonify({
-            "error":
-                "Please enter something."
-        }), 400
+            return jsonify({
+                "error":
+                    "Invalid request."
+            }), 400
 
-    if input_type == "search":
+        user_input = data.get(
+            "input",
+            ""
+        ).strip()
 
-        number_of_posts = max(
-            1,
-            min(
-                number_of_posts,
-                100
+        input_type = data.get(
+            "input_type",
+            "search"
+        )
+
+        number_of_posts = int(
+            data.get(
+                "number_of_posts",
+                10
             )
         )
 
-    print("")
-    print(
-        "=============================="
-    )
+        if not user_input:
 
-    print(
-        "NEW REPORT REQUEST"
-    )
+            return jsonify({
+                "error":
+                    "Please enter something."
+            }), 400
 
-    print(
-        "=============================="
-    )
+        if input_type == "search":
 
-    # ------------------------------------------------------
-    # SEARCH OR DIRECT URL
-    # ------------------------------------------------------
+            number_of_posts = max(
+                1,
+                min(
+                    number_of_posts,
+                    100
+                )
+            )
 
-    if input_type == "url":
-
+        print("")
         print(
-            "Processing direct X URL..."
-        )
-
-        posts = get_post_from_url(
-            user_input
-        )
-
-    else:
-
-        print(
-            "Searching X..."
+            "=============================="
         )
 
         print(
-            "Requested posts:",
-            number_of_posts
+            "NEW REPORT REQUEST"
         )
 
-        posts = search_posts(
-            user_input,
-            number_of_posts
+        print(
+            "=============================="
         )
 
-    print(
-        "Posts found:",
-        len(posts)
-    )
+        # ------------------------------------------------------
+        # SEARCH OR DIRECT URL
+        # ------------------------------------------------------
 
-    if not posts:
+        if input_type == "url":
+
+            print(
+                "Processing direct X URL..."
+            )
+
+            posts = get_post_from_url(
+                user_input
+            )
+
+        else:
+
+            print(
+                "Searching X..."
+            )
+
+            print(
+                "Requested posts:",
+                number_of_posts
+            )
+
+            posts = search_posts(
+                user_input,
+                number_of_posts
+            )
+
+        print(
+            "Posts found:",
+            len(posts)
+        )
+
+        if not posts:
+
+            return jsonify({
+                "error":
+                    "No posts found."
+            }), 404
+
+        # ------------------------------------------------------
+        # SCREENSHOTS
+        # ------------------------------------------------------
+
+        print(
+            "Starting screenshot process..."
+        )
+
+        posts = take_screenshots(
+            posts
+        )
+
+        print(
+            "Successful screenshots:",
+            len(posts)
+        )
+
+        if not posts:
+
+            return jsonify({
+                "error":
+                    "Could not capture the X posts."
+            }), 500
+
+        # ------------------------------------------------------
+        # WORD REPORT
+        # ------------------------------------------------------
+
+        print(
+            "Creating Word report..."
+        )
+
+        create_word_report(
+            posts
+        )
+
+        print(
+            "REPORT COMPLETE"
+        )
+
+        print(
+            "=============================="
+        )
+
+        return jsonify({
+
+            "success": True,
+
+            "download_url":
+                "/download",
+
+            "posts":
+                len(posts)
+
+        })
+
+    except Exception as e:
+
+        print("")
+        print(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+
+        print(
+            "ERROR WHILE GENERATING REPORT"
+        )
+
+        print(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+
+        print(
+            "ERROR:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        print(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+
+        print("")
 
         return jsonify({
             "error":
-                "No posts found."
-        }), 404
-
-    # ------------------------------------------------------
-    # SCREENSHOTS
-    # ------------------------------------------------------
-
-    print(
-        "Starting screenshot process..."
-    )
-
-    posts = take_screenshots(
-        posts
-    )
-
-    print(
-        "Successful screenshots:",
-        len(posts)
-    )
-
-    if not posts:
-
-        return jsonify({
-            "error":
-                "Could not capture the X posts."
+                "Something went wrong."
         }), 500
 
-    # ------------------------------------------------------
-    # WORD REPORT
-    # ------------------------------------------------------
 
-    print(
-        "Creating Word report..."
-    )
-
-    create_word_report(
-        posts
-    )
-
-    print(
-        "REPORT COMPLETE"
-    )
-
-    print(
-        "=============================="
-    )
-
-    return jsonify({
-
-        "success": True,
-
-        "download_url":
-            "/download",
-
-        "posts":
-            len(posts)
-
-    })
-
-except Exception as e:
-
-    print("")
-    print(
-        "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    )
-
-    print(
-        "ERROR WHILE GENERATING REPORT"
-    )
-
-    print(
-        "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    )
-
-    print(
-        "ERROR:",
-        str(e)
-    )
-
-    traceback.print_exc()
-
-    print(
-        "!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    )
-
-    print("")
-
-    return jsonify({
-        "error":
-            "Something went wrong."
-    }), 500
-
-============================================================
-
-DOWNLOAD REPORT
-
-============================================================
+# ============================================================
+# DOWNLOAD REPORT
+# ============================================================
 
 @app.route("/download")
 def download():
 
-file_path = (
-    f"{REPORT_DIR}/X_Report.docx"
-)
+    file_path = (
+        f"{REPORT_DIR}/X_Report.docx"
+    )
 
-if not os.path.exists(
-    file_path
-):
+    if not os.path.exists(
+        file_path
+    ):
 
-    return jsonify({
-        "error":
-            "Report not found."
-    }), 404
+        return jsonify({
+            "error":
+                "Report not found."
+        }), 404
 
-return send_file(
-    file_path,
-    as_attachment=True,
-    download_name="X_Report.docx"
-)
+    return send_file(
+        file_path,
+        as_attachment=True,
+        download_name="X_Report.docx"
+    )
 
-============================================================
 
-START SERVER
+# ============================================================
+# START SERVER
+# ============================================================
 
-============================================================
+if __name__ == "__main__":
 
-if name == "main":
+    print("")
+    print(
+        "======================================"
+    )
 
-print("")
-print(
-    "======================================"
-)
+    print(
+        "X/Twitter Report Generator"
+    )
 
-print(
-    "X/Twitter Report Generator"
-)
+    print(
+        "Starting Flask server..."
+    )
 
-print(
-    "Starting Flask server..."
-)
+    print(
+        "======================================"
+    )
 
-print(
-    "======================================"
-)
+    print("")
 
-print("")
-
-app.run(
-    host="127.0.0.1",
-    port=5000,
-    debug=False,
-    use_reloader=False
-)
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=False,
+        use_reloader=False
+    )
