@@ -222,7 +222,14 @@ def get_x_oembed(post_url):
 # CREATE SCREENSHOT PAGE
 # ============================================================
 
-def create_embed_page_html(embed_html):
+def create_embed_page_html(embed_html, post_url):
+    safe_url = (
+        post_url
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
     return f"""
 <!DOCTYPE html>
@@ -239,7 +246,6 @@ def create_embed_page_html(embed_html):
     <title>X Post</title>
 
     <style>
-
         html,
         body {{
             margin: 0;
@@ -248,14 +254,78 @@ def create_embed_page_html(embed_html):
         }}
 
         body {{
-            width: 700px;
+            width: 800px;
             min-height: 300px;
+            box-sizing: border-box;
+        }}
 
+        #screenshot-frame {{
+            width: 800px;
+            background: white;
+            box-sizing: border-box;
+            overflow: hidden;
+        }}
+
+        /* Browser-style address bar */
+        #address-bar {{
+            width: 100%;
+            height: 48px;
+            background: #f1f3f6;
+            border-bottom: 1px solid #d7dbe0;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }}
+
+        #browser-controls {{
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-right: 10px;
+        }}
+
+        .control-dot {{
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #b8bdc5;
+        }}
+
+        #url-box {{
+            flex: 1;
+            height: 32px;
+            background: white;
+            border: 1px solid #d5d9df;
+            border-radius: 17px;
+            display: flex;
+            align-items: center;
+            padding: 0 13px;
+            box-sizing: border-box;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }}
+
+        #lock {{
+            font-size: 14px;
+            margin-right: 8px;
+            color: #5f6368;
+        }}
+
+        #url-text {{
+            font-size: 14px;
+            color: #202124;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+
+        #tweet-area {{
+            width: 100%;
             display: flex;
             justify-content: center;
             align-items: flex-start;
-
-            padding: 25px;
+            padding: 18px 0 18px 0;
             box-sizing: border-box;
         }}
 
@@ -267,14 +337,31 @@ def create_embed_page_html(embed_html):
         blockquote.twitter-tweet {{
             margin: 0 auto !important;
         }}
-
     </style>
 </head>
 
 <body>
+    <div id="screenshot-frame">
 
-    <div id="tweet-container">
-        {embed_html}
+        <div id="address-bar">
+            <div id="browser-controls">
+                <div class="control-dot"></div>
+                <div class="control-dot"></div>
+                <div class="control-dot"></div>
+            </div>
+
+            <div id="url-box">
+                <span id="lock">◉</span>
+                <span id="url-text">{safe_url}</span>
+            </div>
+        </div>
+
+        <div id="tweet-area">
+            <div id="tweet-container">
+                {embed_html}
+            </div>
+        </div>
+
     </div>
 
     <script
@@ -282,10 +369,10 @@ def create_embed_page_html(embed_html):
         src="https://platform.x.com/widgets.js"
         charset="utf-8">
     </script>
-
 </body>
 </html>
 """
+
 
 
 # ============================================================
@@ -409,7 +496,8 @@ def take_screenshots(posts):
                 embed_html = get_x_oembed(post_url)
 
                 html = create_embed_page_html(
-                    embed_html
+                    embed_html,
+                    post_url
                 )
 
                 page = context.new_page()
@@ -541,6 +629,17 @@ def take_screenshots(posts):
                 # Short stabilization delay.
                 page.wait_for_timeout(500)
 
+                # Capture the complete custom browser-style frame:
+                # address bar + only the X post.
+                screenshot_target = page.locator(
+                    "#screenshot-frame"
+                )
+
+                screenshot_target.wait_for(
+                    state="visible",
+                    timeout=10000
+                )
+
                 screenshot_done = False
 
                 # Two attempts instead of three.
@@ -553,7 +652,7 @@ def take_screenshots(posts):
                             f"{attempt}/2..."
                         )
 
-                        target.screenshot(
+                        screenshot_target.screenshot(
                             path=filename,
                             timeout=10000
                         )
