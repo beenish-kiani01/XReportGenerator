@@ -545,7 +545,7 @@ def wait_for_x_embed(page):
 
 
 # ============================================================
-# TAKE REAL X EMBED SCREENSHOTS (CROPPED AT TIMESTAMP)
+# TAKE REAL X EMBED SCREENSHOTS (CROPPED AT DATE/TIME/VIEWS LINE)
 # ============================================================
 
 def take_screenshots(posts):
@@ -562,7 +562,10 @@ def take_screenshots(posts):
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-gpu",
+                "--disable-web-security",
+                "--disable-site-isolation-trials",
+                "--disable-features=IsolateOrigins,site-per-process"
             ]
         )
 
@@ -638,25 +641,90 @@ def take_screenshots(posts):
                 browser_frame = page.locator(".browser-window")
                 browser_box = browser_frame.bounding_box()
 
-                # Get bottom position of the time/date element inside the iframe
+                # Calculate height to crop exactly below the date/time/views line,
+                # excluding the like/reply/retweet/share action row and anything after it.
                 crop_height = page.evaluate(
                     """
                     () => {
                         const iframe = document.querySelector('iframe.twitter-tweet-rendered');
-                        if (!iframe || !iframe.contentWindow) return null;
-                        
-                        const doc = iframe.contentWindow.document;
-                        const timeElement = doc.querySelector('time') || doc.querySelector('[aria-label*="PM"], [aria-label*="AM"]');
-                        
-                        if (timeElement) {
-                            const timeRect = timeElement.getBoundingClientRect();
-                            const iframeRect = iframe.getBoundingClientRect();
-                            const browserRect = document.querySelector('.browser-window').getBoundingClientRect();
-                            
-                            // Calculate relative offset from browser window top to bottom of timestamp
-                            return (iframeRect.top - browserRect.top) + timeRect.bottom + 12;
+                        if (!iframe) return null;
+
+                        const iframeRect = iframe.getBoundingClientRect();
+                        const browserRect = document.querySelector('.browser-window').getBoundingClientRect();
+
+                        // Reading into the embed's document can be blocked since it is
+                        // served from a different origin (platform.x.com). Guard it so a
+                        // blocked read never crashes the whole capture.
+                        let doc = null;
+                        try {
+                            doc = iframe.contentWindow.document;
+                        } catch (e) {
+                            doc = null;
                         }
-                        return null;
+
+                        let bottomPos = null;
+
+                        if (doc) {
+                            try {
+                                // Hide the action/engagement row and any "read more" link so
+                                // they can never leak into the crop even if the height math misses them.
+                                const elementsToHide = doc.querySelectorAll(
+                                    '[data-testid="reply"], [data-testid="retweet"], [data-testid="unretweet"], ' +
+                                    '[data-testid="like"], [data-testid="unlike"], [role="group"], footer, ' +
+                                    'a[href*="intent"], [aria-label*="read more" i], [aria-label*="read on x" i], ' +
+                                    '[aria-label*="read on twitter" i]'
+                                );
+                                elementsToHide.forEach(el => { el.style.display = 'none'; });
+
+                                // The timestamp element marks the date/time line.
+                                const timeElement = doc.querySelector('time');
+
+                                if (timeElement) {
+                                    let bottom = timeElement.getBoundingClientRect().bottom;
+                                    const timeTop = timeElement.getBoundingClientRect().top;
+
+                                    // If a view-count element sits on the same row as the
+                                    // timestamp, include it too so the crop line sits below
+                                    // "Views" as well.
+                                    const candidates = Array.from(doc.querySelectorAll('a, span, div'));
+                                    const viewsEl = candidates.find(el => {
+                                        const text = (el.textContent || '').trim();
+                                        return /\\bviews?\\b/i.test(text) && text.length < 40;
+                                    });
+
+                                    if (viewsEl) {
+                                        const viewsRect = viewsEl.getBoundingClientRect();
+                                        if (Math.abs(viewsRect.top - timeTop) < 25) {
+                                            bottom = Math.max(bottom, viewsRect.bottom);
+                                        }
+                                    }
+
+                                    bottomPos = bottom;
+                                } else {
+                                    // Fallback to text body bottom if the time element is missing
+                                    const tweetText = doc.querySelector('[data-testid="tweetText"]');
+                                    if (tweetText) {
+                                        bottomPos = tweetText.getBoundingClientRect().bottom + 30;
+                                    }
+                                }
+                            } catch (e) {
+                                bottomPos = null;
+                            }
+                        }
+
+                        if (bottomPos) {
+                            // Return exact bottom position relative to top of browser window frame
+                            return (iframeRect.top - browserRect.top) + bottomPos + 8;
+                        }
+
+                        // Could not read inside the embed's document at all (still blocked
+                        // by cross-origin restrictions). The action-button row plus the
+                        // "Read more on X" footer take up a fairly fixed amount of space at
+                        // the very bottom of the rendered embed regardless of tweet length,
+                        // so trim that fixed amount off instead of showing the whole thing.
+                        const FIXED_FOOTER_HEIGHT = 112;
+                        const trimmedHeight = Math.max(iframeRect.height - FIXED_FOOTER_HEIGHT, 40);
+                        return (iframeRect.top - browserRect.top) + trimmedHeight;
                     }
                     """
                 )
@@ -667,7 +735,6 @@ def take_screenshots(posts):
                 )
 
                 if crop_height and browser_box:
-                    # Clip the screenshot directly below the timestamp
                     page.screenshot(
                         path=filename,
                         clip={
@@ -678,7 +745,6 @@ def take_screenshots(posts):
                         }
                     )
                 else:
-                    # Fallback to full browser window if time calculation fails
                     browser_frame.screenshot(
                         path=filename,
                         timeout=15000
